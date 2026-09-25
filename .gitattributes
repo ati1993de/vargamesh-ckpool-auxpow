@@ -1,0 +1,6 @@
+*.asm -text
+*.s -text
+*.S -text
+README.md text eol=lf
+NOTICE text eol=lf
+examples/*.conf text eol=lf

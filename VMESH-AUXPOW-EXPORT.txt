@@ -1,0 +1,12 @@
+VargaMesh / VMESH AuxPoW CKPool integration
+
+This export is based on the generic VMESH AuxPoW integration
+before the project-specific per-miner merged-SOLO extensions.
+
+Parent chain : Bitcoin
+Child chain  : VargaMesh (VMESH)
+Algorithm    : SHA-256d
+Mode         : AuxPoW merged mining
+
+Project:
+https://vargacoin.com/
