@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   publish:
-    if: github.event.head_commit.message == 'chore(release): publish v1.1.0 and retire v1.0.0'
+    if: "github.event.head_commit.message == 'chore(release): publish v1.1.0 and retire v1.0.0'"
     runs-on: ubuntu-latest
     steps:
       - name: Create the new release, then remove the retired release and tag
