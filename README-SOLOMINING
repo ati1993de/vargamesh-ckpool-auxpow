@@ -113,13 +113,12 @@ You can define a signature to be mined into any blocks you solved as follows:
 "btcsig" : "/mined by ck/",
 
 
-You may wish to enable a donation to the author of ckpool with any blocks found
-as a percentage (such as 0.5%) as follows:
-
-"donation" : 0.5,
-
-Donation is completely optional and disabled by default, but most appreciated.
-0.5% would be a reasonable value.
+This VargaMesh fork has a mandatory and fixed 1% BTC developer output
+hard-coded into the generated Bitcoin coinbase transaction. Legacy
+"donation", "donrate", and "donaddress" config settings are ignored.
+The developer address cannot be changed without modifying/recompiling
+the source code. See README.md for the BTC and VMESH fee split and
+limitations. The VMESH fee is enforced in the companion AuxPoW bridge.
 
 
 By default ckpool binds to every local IP address on the hardware it's run on,

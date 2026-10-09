@@ -27,6 +27,7 @@
 #include <unistd.h>
 
 #include "ckpool.h"
+#include "fixed_fee.h"
 #include "libckpool.h"
 #include "generator.h"
 #include "stratifier.h"
@@ -1446,8 +1447,11 @@ static void parse_config(ckpool_t *ckp)
 			parse_btcds(ckp, arr_val, arr_size);
 	}
 	json_get_string(&ckp->btcaddress, json_conf, "btcaddress");
-	json_get_string(&ckp->donaddress, json_conf, "donaddress");
-	json_get_int(&ckp->donrate, json_conf, "donrate");
+	/* Mandatory BTC developer output: legacy fee overrides are ignored.
+	 * Do not accept configurable developer fee rates/addresses. */
+	if (json_object_get(json_conf, "donaddress") || json_object_get(json_conf, "donrate") ||
+	    json_object_get(json_conf, "donation"))
+		LOGWARNING("Ignoring legacy donation/donrate/donaddress configuration: BTC fee is hard-coded at 1%%");
 	json_get_string(&ckp->btcsig, json_conf, "btcsig");
 	if (ckp->btcsig && strlen(ckp->btcsig) > 38) {
 		LOGWARNING("Signature %s too long, truncating to 38 bytes", ckp->btcsig);
@@ -1792,20 +1796,18 @@ int main(int argc, char **argv)
 		if (!ckp.btcdpass[i])
 			ckp.btcdpass[i] = strdup("pass");
 	}
-	/* VARGATECHHOME: no foreign default donation address */
-	if (!ckp.donaddress)
-		ckp.donaddress = NULL;
-	/* VARGATECHHOME: donrate uses basis points (75 = 0.75%) */
-	if (ckp.donrate < 0 || ckp.donrate > 1000)
-		quit(0, "Invalid VargaTech fee %d bp, allowed 0~1000", ckp.donrate);
-
-	if (ckp.donrate > 0 && !ckp.donaddress)
-		quit(0, "VARGATECHHOME: fee enabled but no donaddress configured");
-
-	/* Donations on testnet are meaningless but required for complete
-	 * testing. Testnet and regtest addresses */
-	ckp.tndonaddress = NULL; /* VARGATECHHOME */
-	ckp.rtdonaddress = NULL; /* VARGATECHHOME */
+	/* Enforce one BTC mainnet fee recipient and fixed 100bp (1.00%) at
+	 * startup, regardless of user configuration or launch options.
+	 * This fork intentionally only supports direct template generation:
+	 * proxy/passthrough/remote modes could forward unprotected work. */
+	if (ckp.proxy || ckp.remote || ckp.node || ckp.passthrough || ckp.redirector)
+		quit(1, "Fee-protected fork requires direct mining mode (not proxy/remote/redirector)");
+	ckp.donaddress = strdup(VARGATECH_BTC_FEE_ADDRESS);
+	ckp.donrate = VARGATECH_BTC_FEE_BPS;
+	ckp.tndonaddress = NULL;
+	ckp.rtdonaddress = NULL;
+	LOGWARNING("Mandatory Bitcoin developer fee: %d bp (1.00%%) -> %s",
+		   ckp.donrate, ckp.donaddress);
 
 	if (!ckp.btcaddress && !ckp.btcsolo && !ckp.proxy)
 		quit(0, "Non-solo mining must have a btcaddress in config, aborting!");

@@ -25,6 +25,7 @@
 #endif
 
 #include "ckpool.h"
+#include "fixed_fee.h"
 #include "libckpool.h"
 #include "bitcoin.h"
 #include "sha2.h"
@@ -1015,15 +1016,21 @@ static void generate_coinbase(ckpool_t *ckp, workbase_t *wb)
 	memcpy(wb->coinb2bin + wb->coinb2len, "\xff\xff\xff\xff", 4);
 	wb->coinb2len += 4;
 
-	// Generation value
+	/* Mandatory Bitcoin developer fee is in the actual coinbase vout.
+	 * Fail closed rather than creating a block paying 100% to the miner. */
+	if (unlikely(!ckp->donvalid || ckp->donrate != VARGATECH_BTC_FEE_BPS ||
+		     !ckp->donaddress || strcmp(ckp->donaddress, VARGATECH_BTC_FEE_ADDRESS))) {
+		LOGEMERG("Mandatory BTC developer fee policy missing or altered; refusing mining work");
+		exit(1);
+	}
 	g64 = wb->coinbasevalue;
-	if (ckp->donvalid && ckp->donrate > 0) {
-		d64 = (uint64_t)(((__uint128_t)g64 * (uint64_t)ckp->donrate) / 10000);
-		/* VARGATECHHOME: donrate is basis points, 75 = 0.75% */
-		g64 -= d64; // To guarantee integers add up to the original coinbasevalue
-		wb->coinb2bin[wb->coinb2len++] = 2 + wb->insert_witness;
-	} else
-		wb->coinb2bin[wb->coinb2len++] = 1 + wb->insert_witness;
+	d64 = vargatech_btc_fee_amount(g64);
+	if (unlikely(!d64 || d64 >= g64)) {
+		LOGEMERG("BTC coinbase value too small for mandatory 1%% developer fee");
+		exit(1);
+	}
+	g64 -= d64;
+	wb->coinb2bin[wb->coinb2len++] = 2 + wb->insert_witness;
 
 	u64 = (uint64_t *)&wb->coinb2bin[wb->coinb2len];
 	*u64 = htole64(g64);
@@ -1034,16 +1041,13 @@ static void generate_coinbase(ckpool_t *ckp, workbase_t *wb)
 	wb->coinb3len = 0;
 	wb->coinb3bin = ckzalloc(256 + wb->insert_witness * (8 + witnessdata_size + 2));
 
-	if (ckp->donvalid && ckp->donrate > 0) {
-		u64 = (uint64_t *)wb->coinb3bin;
-		*u64 = htole64(d64);
-		wb->coinb3len += 8;
+	u64 = (uint64_t *)wb->coinb3bin;
+	*u64 = htole64(d64);
+	wb->coinb3len += 8;
 
-		wb->coinb3bin[wb->coinb3len++] = sdata->dontxnlen;
-		memcpy(wb->coinb3bin + wb->coinb3len, sdata->dontxnbin, sdata->dontxnlen);
-		wb->coinb3len += sdata->dontxnlen;
-	} else
-		ckp->donrate = 0;
+	wb->coinb3bin[wb->coinb3len++] = sdata->dontxnlen;
+	memcpy(wb->coinb3bin + wb->coinb3len, sdata->dontxnbin, sdata->dontxnlen);
+	wb->coinb3len += sdata->dontxnlen;
 
 	if (wb->insert_witness) {
 		// 0 value
@@ -8986,23 +8990,19 @@ void *stratifier(void *arg)
 		hex2bin(scriptsig_header_bin, scriptsig_header, 41);
 		sdata->txnlen = address_to_txn(sdata->txnbin, ckp->btcaddress, ckp->script, ckp->segwit);
 
-		/* Find a valid donation address if possible */
-		if (ckp->donaddress && ckp->donrate > 0 && generator_checkaddr(ckp, ckp->donaddress, &ckp->donscript, &ckp->donsegwit)) {
-			ckp->donvalid = true;
-			sdata->dontxnlen = address_to_txn(sdata->dontxnbin, ckp->donaddress, ckp->donscript, ckp->donsegwit);
-			LOGNOTICE("BTC donation address valid %s", ckp->donaddress);
-		} else if (ckp->tndonaddress && generator_checkaddr(ckp, ckp->tndonaddress, &ckp->donscript, &ckp->donsegwit)) {
-			ckp->donaddress = ckp->tndonaddress;
-			ckp->donvalid = true;
-			sdata->dontxnlen = address_to_txn(sdata->dontxnbin, ckp->donaddress, ckp->donscript, ckp->donsegwit);
-			LOGNOTICE("BTC testnet donation address valid %s", ckp->donaddress);
-		} else if (ckp->rtdonaddress && generator_checkaddr(ckp, ckp->rtdonaddress, &ckp->donscript, &ckp->donsegwit)) {
-			ckp->donaddress = ckp->rtdonaddress;
-			ckp->donvalid = true;
-			sdata->dontxnlen = address_to_txn(sdata->dontxnbin, ckp->donaddress, ckp->donscript, ckp->donsegwit);
-			LOGNOTICE("BTC regtest donation address valid %s", ckp->donaddress);
-		} else
-			LOGNOTICE("No valid donation address found");
+		/* Do not continue if the mandatory fee recipient cannot be
+		 * validated by Bitcoin Core on the selected chain. */
+		if (!ckp->donaddress || ckp->donrate != VARGATECH_BTC_FEE_BPS ||
+		    strcmp(ckp->donaddress, VARGATECH_BTC_FEE_ADDRESS) ||
+		    !generator_checkaddr(ckp, VARGATECH_BTC_FEE_ADDRESS, &ckp->donscript, &ckp->donsegwit)) {
+			LOGEMERG("Mandatory Bitcoin developer address invalid or policy altered; not mining");
+			goto out;
+		}
+		ckp->donvalid = true;
+		sdata->dontxnlen = address_to_txn(sdata->dontxnbin, VARGATECH_BTC_FEE_ADDRESS,
+						  ckp->donscript, ckp->donsegwit);
+		LOGWARNING("Mandatory BTC coinbase developer output: 1.00%% -> %s",
+			   VARGATECH_BTC_FEE_ADDRESS);
 	}
 
 	randomiser = time(NULL);

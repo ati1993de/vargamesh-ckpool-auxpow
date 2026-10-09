@@ -1,0 +1,38 @@
+name: Fixed Bitcoin developer fee and CKPool build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y autoconf automake libtool pkg-config build-essential yasm libzmq3-dev libcap2-dev libssl-dev
+      - name: Fixed fee arithmetic test
+        run: |
+          cc -std=gnu11 -Wall -Wextra -Werror -Isrc tests/test_fixed_fee.c -o /tmp/test-fixed-fee
+          /tmp/test-fixed-fee
+      - name: Configuration bypass regression
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          ck=Path("src/ckpool.c").read_text()
+          st=Path("src/stratifier.c").read_text()
+          assert 'json_get_int(&ckp->donrate' not in ck
+          assert 'json_get_string(&ckp->donaddress' not in ck
+          assert 'ckp->donrate = 0' not in st
+          assert "vargatech_btc_fee_amount(g64)" in st
+          assert "Mandatory Bitcoin developer address invalid" in st
+          print("PASS: no donation JSON override or fee-disabled fallback")
+          PY
+      - name: Autotools build
+        run: |
+          ./autogen.sh
+          ./configure
+          make -j2
